@@ -36,7 +36,7 @@
     </div>
     
     <div class="input-group">
-        <label for="usd">🇺 Dólares (USD)</label>
+        <label for="usd">🇸 Dólares (USD)</label>
         <input type="number" id="usd" placeholder="0.00" step="0.01">
     </div>
 
@@ -46,7 +46,7 @@
     </div>
 
     <div class="input-group">
-        <label for="tasa-manual">⚙️ Tasa BCV (Bs/$)</label>
+        <label for="tasa-manual">️ Tasa BCV (Bs/$)</label>
         <input type="number" id="tasa-manual" placeholder="Ej: 784.66" step="0.01">
     </div>
 
@@ -54,17 +54,12 @@
         <button class="refresh-btn" onclick="obtenerTasaBCV(false)">🔄 Actualizar</button>
         <button class="manual-btn" onclick="guardarTasaManual()">💾 Guardar</button>
     </div>
-    <button class="force-btn" onclick="forzarActualizacion()">⚡ Forzar desde Google Sheet</button>
+    <button class="force-btn" onclick="forzarActualizacion()">⚡ Forzar actualización</button>
 </div>
 
 <script>
-    // FUENTE PRINCIPAL: Tu Google Sheet (ya tiene la fórmula IMPORTXML que funciona)
-    const GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQYPndPKPlfxCBdhs8DSDb9FPt6cefwTo2TYKStHt0sfzLtVMwE887G-yTKo-VG1A/pub?output=csv";
-    
-    // Fuentes de respaldo
-    const BCV_URL = "https://www.bcv.org.ve/";
-    const CORS_PROXY = "https://corsproxy.io/?";
-    const DOLARAPI_URL = "https://ve.dolarapi.com/v1/dolares/oficial";
+    // URL del archivo tasa.csv en GitHub (se actualiza automáticamente)
+    const TASA_URL = "https://raw.githubusercontent.com/abjeropi/calculadora_bcv/main/tasa.csv";
 
     let tasaBCV = 0;
     const usdInput = document.getElementById('usd');
@@ -81,119 +76,52 @@
         const fechaGuardadaObj = fechaGuardada ? new Date(fechaGuardada) : null;
         const ahora = new Date();
         
-        // Si la tasa guardada tiene más de 24 horas, no la uses
+        // Si la tasa guardada tiene menos de 24 horas, úsala
         if (tasaGuardada && fechaGuardadaObj && (ahora - fechaGuardadaObj) < 24 * 60 * 60 * 1000) {
             tasaBCV = parseFloat(tasaGuardada);
             tasaManualInput.value = tasaBCV;
             actualizarDisplay(`Tasa guardada: ${tasaBCV} Bs/$`, fechaGuardada, 'Memoria local (< 24h)');
         } else {
-            tasaDisplay.innerHTML = "⚠️ Tasa expirada, actualizando...";
+            tasaDisplay.innerHTML = "️ Tasa expirada, actualizando...";
         }
         obtenerTasaBCV(false);
     };
 
     async function obtenerTasaBCV(forzar = false) {
         if (!forzar) {
-            tasaDisplay.innerHTML = "🔄 Buscando tasa...";
+            tasaDisplay.innerHTML = " Buscando tasa...";
         } else {
-            tasaDisplay.innerHTML = "⚡ Consultando Google Sheet...";
+            tasaDisplay.innerHTML = "⚡ Actualizando desde GitHub...";
         }
         sourceDisplay.innerText = "";
         
-        // INTENTO 1: Google Sheet (TU FÓRMULA QUE YA FUNCIONA)
         try {
-            const response = await fetch(GOOGLE_SHEET_URL);
-            if (response.ok) {
-                const texto = await response.text();
-                
-                // El CSV viene así:
-                // Linea 0: "Dolar BCV","Dolar/Bolivar","Bolivar/Dolar"
-                // Linea 1: 784.6633,1.50,0.00
-                const lineas = texto.split('\n');
-                
-                if (lineas.length > 1) {
-                    // Tomamos la SEGUNDA línea (índice 1) - fila 2 del Excel
-                    // Y la PRIMERA columna (A2) - antes de la primera coma
-                    const celdaA2 = lineas[1].split(',')[0];
-                    
-                    // Limpiar: quitar comillas, espacios, y asegurar que sea número
-                    const valorLimpio = celdaA2.replace(/["'\s]/g, '');
-                    const tasa = parseFloat(valorLimpio);
-                    
-                    if (!isNaN(tasa) && tasa > 100) {
-                        guardarYMostrar(tasa, 'Google Sheet (oficial)');
-                        return;
-                    } else {
-                        console.log("Valor inválido en A2:", valorLimpio, "tasa:", tasa);
-                    }
-                }
-                throw new Error("CSV mal formado o vacío");
+            // Leer el archivo tasa.csv de GitHub (agregamos timestamp para evitar caché)
+            const response = await fetch(TASA_URL + '?t=' + Date.now());
+            
+            if (!response.ok) {
+                throw new Error("HTTP " + response.status);
             }
-        } catch (e) { 
-            console.log("Google Sheet falló:", e);
-            if (!forzar) {
-                // Si no es forzado, intentar otras fuentes
-            } else {
-                alertBox.style.display = 'block';
-                tasaDisplay.innerHTML = '⚠️ No se pudo leer el Google Sheet';
-                sourceDisplay.innerText = 'Verifica tu conexión o usa manual';
+            
+            const texto = await response.text();
+            const tasa = parseFloat(texto.trim());
+            
+            if (!isNaN(tasa) && tasa > 100) {
+                guardarYMostrar(tasa, 'GitHub Actions (auto)');
                 return;
             }
-        }
-        
-        if (!forzar) {
-            // INTENTO 2: BCV Directo vía proxy
-            try {
-                tasaDisplay.innerHTML = "📡 Consultando BCV...";
-                const response = await fetch(CORS_PROXY + encodeURIComponent(BCV_URL));
-                if (response.ok) {
-                    const html = await response.text();
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(html, 'text/html');
-                    
-                    const filas = doc.querySelectorAll('tr');
-                    for (let fila of filas) {
-                        const celdas = fila.querySelectorAll('td');
-                        if (celdas.length >= 2) {
-                            const texto = celdas[0].textContent.trim().toUpperCase();
-                            if (texto.includes('USD') || texto.includes('$')) {
-                                const valorTexto = celdas[1].textContent.trim();
-                                const valorLimpio = valorTexto.replace(/[^0-9.]/g, '');
-                                const tasa = parseFloat(valorLimpio);
-                                
-                                if (!isNaN(tasa) && tasa > 100) {
-                                    guardarYMostrar(tasa, 'BCV Directo');
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                    throw new Error("No se encontró USD en el HTML");
-                }
-            } catch (e) { console.log("BCV Directo falló:", e); }
+            throw new Error("Tasa inválida: " + tasa);
             
-            // INTENTO 3: DolarAPI
-            try {
-                tasaDisplay.innerHTML = "📡 Consultando DolarAPI...";
-                const response = await fetch(DOLARAPI_URL);
-                if (response.ok) {
-                    const data = await response.json();
-                    const tasa = parseFloat(data.promedio);
-                    if (!isNaN(tasa) && tasa > 100) {
-                        guardarYMostrar(tasa, 'DolarAPI');
-                        return;
-                    }
-                }
-            } catch (e) { console.log("DolarAPI falló:", e); }
+        } catch (error) {
+            console.error("Error:", error);
+            alertBox.style.display = 'block';
+            tasaDisplay.innerHTML = '⚠️ Error al obtener tasa';
+            sourceDisplay.innerText = 'Usa el botón Forzar o ingresa manual';
         }
-        
-        // Si todo falla
-        alertBox.style.display = 'block';
-        tasaDisplay.innerHTML = '⚠️ Sin conexión a ninguna fuente';
-        sourceDisplay.innerText = 'Usa el botón "Forzar" o ingresa manual';
     }
 
     function forzarActualizacion() {
+        // Limpiar caché y forzar actualización
         localStorage.removeItem('tasaBCV');
         localStorage.removeItem('fechaBCV');
         obtenerTasaBCV(true);
