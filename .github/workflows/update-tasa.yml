@@ -3,44 +3,74 @@ name: Actualizar Tasa BCV
 on:
   schedule:
     - cron: '0 12 * * *'  # Todos los días a las 8am Venezuela (12:00 UTC)
-  workflow_dispatch:  # Permite ejecutarlo manualmente si quieres
+  workflow_dispatch:  # Permite ejecutarlo manualmente
 
 jobs:
   update-tasa:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     
     steps:
       - name: Checkout del repositorio
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Descargar página del BCV
         run: |
+          echo "Descargando página del BCV..."
           curl -s "https://www.bcv.org.ve/" -o bcv.html -H "User-Agent: Mozilla/5.0"
+          echo "Descarga completada"
+          ls -la bcv.html
       
       - name: Extraer tasa del dólar
+        id: extract
         run: |
-          # Buscar el valor en el HTML
-          # El BCV tiene algo como: <div id="dolar"><strong>784,66330000</strong></div>
+          echo "Extrayendo tasa..."
           
-          TASA=$(grep -oP '(?<=<div[^>]*id="dolar"[^>]*>.*?<strong>)[0-9.,]+' bcv.html | head -1)
+          # Método 1: Buscar por id="dolar"
+          TASA=$(grep -oP '(?<=id="dolar")[^>]*>.*?<strong[^>]*>\K[0-9.,]+' bcv.html | head -1 || echo "")
           
-          # Si no lo encontró con id="dolar", buscar por "USD"
+          # Método 2: Buscar tabla de tasas
           if [ -z "$TASA" ]; then
-            TASA=$(grep -oP 'USD.*?[0-9]+[.,][0-9]+' bcv.html | grep -oP '[0-9]+[.,][0-9]+' | head -1)
+            TASA=$(grep -oP 'USD.*?</td><td[^>]*>\K[0-9]+[.,][0-9]+' bcv.html | head -1 || echo "")
           fi
           
-          # Limpiar: cambiar coma por punto si es necesario
-          TASA=$(echo $TASA | tr ',' '.')
+          # Método 3: Buscar cualquier número grande que parezca tasa
+          if [ -z "$TASA" ]; then
+            TASA=$(grep -oP '[0-9]{3}[.,][0-9]{4,}' bcv.html | head -1 || echo "")
+          fi
+          
+          # Limpiar: quitar puntos de miles, dejar solo decimales
+          TASA=$(echo $TASA | tr -d '.' | sed 's/,/./')
           
           echo "Tasa encontrada: $TASA"
+          echo "tasa=$TASA" >> $GITHUB_OUTPUT
+          
+          if [ -z "$TASA" ]; then
+            echo "ERROR: No se pudo extraer la tasa del BCV"
+            exit 1
+          fi
+          
+          # Guardar en archivo
           echo $TASA > tasa.csv
+          echo "Archivo tasa.csv creado con: $TASA"
+          cat tasa.csv
           
       - name: Guardar cambios en GitHub
         run: |
+          echo "Configurando git..."
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
+          
+          echo "Agregando cambios..."
           git add tasa.csv
-          git commit -m "Actualización automática BCV $(date +%Y-%m-%d)" || echo "Sin cambios"
-          git push
+          
+          echo "Haciendo commit..."
+          git commit -m "Actualización automática BCV $(date +%Y-%m-%d)" || echo "Sin cambios nuevos"
+          
+          echo "Haciendo push..."
+          git push origin main
+          
+          echo "¡Listo!"
