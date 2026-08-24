@@ -19,6 +19,7 @@
         .refresh-btn { background-color: #00e676; color: #1e1e1e; }
         .manual-btn { background-color: #ff9800; color: #1e1e1e; }
         .alert { background-color: #ff5722; color: white; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.85em; text-align: center; display: none; }
+        .source-tag { font-size: 0.7em; color: #666; margin-top: 3px; }
     </style>
 </head>
 <body>
@@ -30,20 +31,21 @@
     <div class="tasa-info" id="tasa-display">
         Cargando...
         <div class="fecha-actualizacion" id="fecha-display"></div>
+        <div class="source-tag" id="source-display"></div>
     </div>
     
     <div class="input-group">
-        <label for="usd">🇺🇸 Dólares (USD)</label>
+        <label for="usd">🇺 Dólares (USD)</label>
         <input type="number" id="usd" placeholder="0.00" step="0.01">
     </div>
 
     <div class="input-group">
-        <label for="ves">🇻🇪 Bolívares (VES)</label>
+        <label for="ves">🇪 Bolívares (VES)</label>
         <input type="number" id="ves" placeholder="0.00" step="0.01">
     </div>
 
     <div class="input-group">
-        <label for="tasa-manual">️ Tasa BCV (Bs/$)</label>
+        <label for="tasa-manual">⚙️ Tasa BCV (Bs/$)</label>
         <input type="number" id="tasa-manual" placeholder="Ej: 784.66" step="0.01">
     </div>
 
@@ -54,14 +56,22 @@
 </div>
 
 <script>
-    // API pública del dólar venezolano (permite CORS)
-    const API_URL = "https://pydolarve.org/api/v1/dollar?page=bcv";
+    // FUENTE 1: API DolarAPI (más estable)
+    const DOLARAPI_URL = "https://ve.dolarapi.com/v1/dolares/oficial";
+    
+    // FUENTE 2: API PyDolarVe (respaldo)
+    const PYDOLAR_URL = "https://pydolarve.org/api/v1/dollar?page=bcv";
+    
+    // FUENTE 3: Scraping directo del BCV vía proxy CORS
+    const BCV_URL = "https://www.bcv.org.ve/";
+    const CORS_PROXY = "https://corsproxy.io/?";
 
     let tasaBCV = 0;
     const usdInput = document.getElementById('usd');
     const vesInput = document.getElementById('ves');
     const tasaDisplay = document.getElementById('tasa-display');
     const fechaDisplay = document.getElementById('fecha-display');
+    const sourceDisplay = document.getElementById('source-display');
     const tasaManualInput = document.getElementById('tasa-manual');
     const alertBox = document.getElementById('alert');
 
@@ -71,42 +81,87 @@
         if (tasaGuardada) {
             tasaBCV = parseFloat(tasaGuardada);
             tasaManualInput.value = tasaBCV;
-            actualizarDisplay(`Tasa guardada: ${tasaBCV} Bs/$`, fechaGuardada || '');
+            actualizarDisplay(`Tasa guardada: ${tasaBCV} Bs/$`, fechaGuardada || '', 'Memoria local');
         }
         obtenerTasaBCV();
     };
 
     async function obtenerTasaBCV() {
-        tasaDisplay.innerHTML = "🔄 Obteniendo tasa...";
+        tasaDisplay.innerHTML = "🔄 Buscando tasa...";
+        sourceDisplay.innerText = "";
         
+        // INTENTO 1: DolarAPI
         try {
-            const response = await fetch(API_URL);
-            const data = await response.json();
-            
-            if (data && data.monitors && data.monitors.usd) {
-                const tasa = parseFloat(data.monitors.usd.price);
-                
+            tasaDisplay.innerHTML = "📡 Consultando DolarAPI...";
+            const response = await fetch(DOLARAPI_URL);
+            if (response.ok) {
+                const data = await response.json();
+                const tasa = parseFloat(data.promedio);
                 if (!isNaN(tasa) && tasa > 100) {
-                    tasaBCV = tasa;
-                    const fecha = new Date().toLocaleString('es-VE');
-                    localStorage.setItem('tasaBCV', tasa);
-                    localStorage.setItem('fechaBCV', fecha);
-                    tasaManualInput.value = tasa;
-                    actualizarDisplay(`✅ BCV: ${tasa.toFixed(2)} Bs/$`, fecha);
-                    alertBox.style.display = 'none';
-                    
-                    if(usdInput.value) calcularDesdeUSD();
-                    else if(vesInput.value) calcularDesdeVES();
+                    guardarYMostrar(tasa, 'DolarAPI');
                     return;
                 }
             }
-            throw new Error("Datos inválidos");
-            
-        } catch (error) {
-            console.error("Error:", error);
-            alertBox.style.display = 'block';
-            actualizarDisplay('⚠️ Sin conexión', localStorage.getItem('fechaBCV') || '');
-        }
+        } catch (e) { console.log("DolarAPI falló:", e); }
+        
+        // INTENTO 2: PyDolarVe
+        try {
+            tasaDisplay.innerHTML = "📡 Consultando PyDolarVe...";
+            const response = await fetch(PYDOLAR_URL);
+            if (response.ok) {
+                const data = await response.json();
+                const tasa = parseFloat(data.monitors?.usd?.price);
+                if (!isNaN(tasa) && tasa > 100) {
+                    guardarYMostrar(tasa, 'PyDolarVe');
+                    return;
+                }
+            }
+        } catch (e) { console.log("PyDolarVe falló:", e); }
+        
+        // INTENTO 3: Scraping directo del BCV vía proxy CORS
+        try {
+            tasaDisplay.innerHTML = " Consultando BCV directamente...";
+            const response = await fetch(CORS_PROXY + encodeURIComponent(BCV_URL));
+            if (response.ok) {
+                const html = await response.text();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                
+                // Busca el div con id="dolar" y dentro el <strong>
+                const dolarDiv = doc.querySelector('#dolar');
+                if (dolarDiv) {
+                    const strong = dolarDiv.querySelector('strong');
+                    if (strong) {
+                        let texto = strong.textContent.trim();
+                        // El BCV usa formato "784,6633" o "784.6633"
+                        texto = texto.replace(/\./g, '').replace(',', '.');
+                        const tasa = parseFloat(texto);
+                        if (!isNaN(tasa) && tasa > 100) {
+                            guardarYMostrar(tasa, 'BCV Directo');
+                            return;
+                        }
+                    }
+                }
+                throw new Error("No se encontró el valor en el HTML");
+            }
+        } catch (e) { console.log("BCV Directo falló:", e); }
+        
+        // Si todo falla
+        alertBox.style.display = 'block';
+        tasaDisplay.innerHTML = '⚠️ Sin conexión a ninguna fuente';
+        sourceDisplay.innerText = 'Usa la tasa manual o espera';
+    }
+
+    function guardarYMostrar(tasa, fuente) {
+        tasaBCV = tasa;
+        const fecha = new Date().toLocaleString('es-VE');
+        localStorage.setItem('tasaBCV', tasa);
+        localStorage.setItem('fechaBCV', fecha);
+        tasaManualInput.value = tasa;
+        actualizarDisplay(`✅ BCV: ${tasa.toFixed(2)} Bs/$`, fecha, `Fuente: ${fuente}`);
+        alertBox.style.display = 'none';
+        if(usdInput.value) calcularDesdeUSD();
+        else if(vesInput.value) calcularDesdeVES();
     }
 
     function guardarTasaManual() {
@@ -116,7 +171,7 @@
             const fecha = new Date().toLocaleString('es-VE');
             localStorage.setItem('tasaBCV', tasaBCV);
             localStorage.setItem('fechaBCV', fecha);
-            actualizarDisplay(`💾 Tasa manual: ${tasaBCV.toFixed(2)} Bs/$`, fecha);
+            actualizarDisplay(`💾 Tasa manual: ${tasaBCV.toFixed(2)} Bs/$`, fecha, 'Ingresada por usuario');
             alertBox.style.display = 'none';
             if(usdInput.value) calcularDesdeUSD();
             else if(vesInput.value) calcularDesdeVES();
@@ -135,8 +190,9 @@
         } 
     }
     
-    function actualizarDisplay(mensaje, fecha) { 
-        tasaDisplay.innerHTML = `${mensaje}<div class="fecha-actualizacion">${fecha}</div>`; 
+    function actualizarDisplay(mensaje, fecha, fuente) { 
+        tasaDisplay.innerHTML = `${mensaje}<div class="fecha-actualizacion">${fecha}</div>`;
+        sourceDisplay.innerText = fuente || '';
     }
 
     usdInput.addEventListener('input', calcularDesdeUSD);
