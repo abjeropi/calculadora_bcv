@@ -20,9 +20,12 @@ jobs:
       - name: Descargar página del BCV
         run: |
           echo "Descargando página del BCV..."
-          curl -s "https://www.bcv.org.ve/" -o bcv.html -H "User-Agent: Mozilla/5.0"
+          # El flag -k ignora errores de certificado SSL
+          curl -k -s "https://www.bcv.org.ve/" -o bcv.html -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
           echo "Descarga completada"
           ls -la bcv.html
+          echo "Primeras 100 líneas del HTML:"
+          head -100 bcv.html
       
       - name: Extraer tasa del dólar
         id: extract
@@ -32,12 +35,12 @@ jobs:
           # Método 1: Buscar por id="dolar"
           TASA=$(grep -oP '(?<=id="dolar")[^>]*>.*?<strong[^>]*>\K[0-9.,]+' bcv.html | head -1 || echo "")
           
-          # Método 2: Buscar tabla de tasas
+          # Método 2: Buscar tabla de tasas con USD
           if [ -z "$TASA" ]; then
             TASA=$(grep -oP 'USD.*?</td><td[^>]*>\K[0-9]+[.,][0-9]+' bcv.html | head -1 || echo "")
           fi
           
-          # Método 3: Buscar cualquier número grande que parezca tasa
+          # Método 3: Buscar cualquier número que parezca tasa (3 dígitos, coma/punto, 4+ dígitos)
           if [ -z "$TASA" ]; then
             TASA=$(grep -oP '[0-9]{3}[.,][0-9]{4,}' bcv.html | head -1 || echo "")
           fi
@@ -50,6 +53,7 @@ jobs:
           
           if [ -z "$TASA" ]; then
             echo "ERROR: No se pudo extraer la tasa del BCV"
+            cat bcv.html | head -200
             exit 1
           fi
           
