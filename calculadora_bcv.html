@@ -27,7 +27,7 @@
 
 <div class="container">
     <h2>Calculadora BCV</h2>
-    <div class="alert" id="alert">⚠️ Error al obtener tasa</div>
+    <div class="alert" id="alert">️ Error al obtener tasa</div>
     
     <div class="tasa-info" id="tasa-display">
         Cargando...
@@ -36,7 +36,7 @@
     </div>
     
     <div class="input-group">
-        <label for="usd">🇺🇸 Dólares (USD)</label>
+        <label for="usd">🇺 Dólares (USD)</label>
         <input type="number" id="usd" placeholder="0.00" step="0.01">
     </div>
 
@@ -54,17 +54,17 @@
         <button class="refresh-btn" onclick="obtenerTasaBCV(false)">🔄 Actualizar</button>
         <button class="manual-btn" onclick="guardarTasaManual()">💾 Guardar</button>
     </div>
-    <button class="force-btn" onclick="forzarActualizacion()">⚡ Forzar actualización desde BCV</button>
+    <button class="force-btn" onclick="forzarActualizacion()">⚡ Forzar desde Google Sheet</button>
 </div>
 
 <script>
-    // FUENTE PRINCIPAL: Scraping directo del BCV vía proxy CORS
-    const BCV_URL = "https://www.bcv.org.ve/";
-    const CORS_PROXY = "https://corsproxy.io/?";
+    // FUENTE PRINCIPAL: Tu Google Sheet (ya tiene la fórmula IMPORTXML que funciona)
+    const GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQYPndPKPlfxCBdhs8DSDb9FPt6cefwTo2TYKStHt0sfzLtVMwE887G-yTKo-VG1A/pub?output=csv";
     
     // Fuentes de respaldo
+    const BCV_URL = "https://www.bcv.org.ve/";
+    const CORS_PROXY = "https://corsproxy.io/?";
     const DOLARAPI_URL = "https://ve.dolarapi.com/v1/dolares/oficial";
-    const PYDOLAR_URL = "https://pydolarve.org/api/v1/dollar?page=bcv";
 
     let tasaBCV = 0;
     const usdInput = document.getElementById('usd');
@@ -96,68 +96,83 @@
         if (!forzar) {
             tasaDisplay.innerHTML = "🔄 Buscando tasa...";
         } else {
-            tasaDisplay.innerHTML = "⚡ Consultando BCV directamente...";
+            tasaDisplay.innerHTML = "⚡ Consultando Google Sheet...";
         }
         sourceDisplay.innerText = "";
         
-        // INTENTO 1: Scraping directo del BCV (PRIORIDAD)
+        // INTENTO 1: Google Sheet (TU FÓRMULA QUE YA FUNCIONA)
         try {
-            const response = await fetch(CORS_PROXY + encodeURIComponent(BCV_URL));
+            const response = await fetch(GOOGLE_SHEET_URL);
             if (response.ok) {
-                const html = await response.text();
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(html, 'text/html');
+                const texto = await response.text();
                 
-                // Buscar el valor del dólar en la tabla de tasas
-                // El BCV tiene una estructura como: <td>USD</td><td>784.66330000</td>
-                const filas = doc.querySelectorAll('tr');
-                for (let fila of filas) {
-                    const celdas = fila.querySelectorAll('td');
-                    if (celdas.length >= 2) {
-                        const textoPrimeraCelda = celdas[0].textContent.trim().toUpperCase();
-                        if (textoPrimeraCelda.includes('USD') || textoPrimeraCelda.includes('$')) {
-                            const valorTexto = celdas[1].textContent.trim();
-                            const valorLimpio = valorTexto.replace(/[^0-9.]/g, '');
-                            const tasa = parseFloat(valorLimpio);
-                            
-                            if (!isNaN(tasa) && tasa > 100) {
-                                guardarYMostrar(tasa, 'BCV Directo (oficial)');
-                                return;
-                            }
-                        }
+                // El CSV viene así:
+                // Linea 0: "Dolar BCV","Dolar/Bolivar","Bolivar/Dolar"
+                // Linea 1: 784.6633,1.50,0.00
+                const lineas = texto.split('\n');
+                
+                if (lineas.length > 1) {
+                    // Tomamos la SEGUNDA línea (índice 1) - fila 2 del Excel
+                    // Y la PRIMERA columna (A2) - antes de la primera coma
+                    const celdaA2 = lineas[1].split(',')[0];
+                    
+                    // Limpiar: quitar comillas, espacios, y asegurar que sea número
+                    const valorLimpio = celdaA2.replace(/["'\s]/g, '');
+                    const tasa = parseFloat(valorLimpio);
+                    
+                    if (!isNaN(tasa) && tasa > 100) {
+                        guardarYMostrar(tasa, 'Google Sheet (oficial)');
+                        return;
+                    } else {
+                        console.log("Valor inválido en A2:", valorLimpio, "tasa:", tasa);
                     }
                 }
-                
-                // Si no encontró en tabla, buscar por id="dolar"
-                const dolarDiv = doc.querySelector('#dolar');
-                if (dolarDiv) {
-                    const strong = dolarDiv.querySelector('strong');
-                    if (strong) {
-                        let texto = strong.textContent.trim();
-                        texto = texto.replace(/\./g, '').replace(',', '.');
-                        const tasa = parseFloat(texto);
-                        if (!isNaN(tasa) && tasa > 100) {
-                            guardarYMostrar(tasa, 'BCV Directo (oficial)');
-                            return;
-                        }
-                    }
-                }
-                
-                throw new Error("No se encontró el valor en el HTML del BCV");
+                throw new Error("CSV mal formado o vacío");
             }
         } catch (e) { 
-            console.log("BCV Directo falló:", e);
+            console.log("Google Sheet falló:", e);
             if (!forzar) {
-                // Si no es forzado, intentar APIs
+                // Si no es forzado, intentar otras fuentes
             } else {
                 alertBox.style.display = 'block';
-                tasaDisplay.innerHTML = '️ No se pudo conectar al BCV';
+                tasaDisplay.innerHTML = '⚠️ No se pudo leer el Google Sheet';
+                sourceDisplay.innerText = 'Verifica tu conexión o usa manual';
                 return;
             }
         }
         
         if (!forzar) {
-            // INTENTO 2: DolarAPI
+            // INTENTO 2: BCV Directo vía proxy
+            try {
+                tasaDisplay.innerHTML = "📡 Consultando BCV...";
+                const response = await fetch(CORS_PROXY + encodeURIComponent(BCV_URL));
+                if (response.ok) {
+                    const html = await response.text();
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    
+                    const filas = doc.querySelectorAll('tr');
+                    for (let fila of filas) {
+                        const celdas = fila.querySelectorAll('td');
+                        if (celdas.length >= 2) {
+                            const texto = celdas[0].textContent.trim().toUpperCase();
+                            if (texto.includes('USD') || texto.includes('$')) {
+                                const valorTexto = celdas[1].textContent.trim();
+                                const valorLimpio = valorTexto.replace(/[^0-9.]/g, '');
+                                const tasa = parseFloat(valorLimpio);
+                                
+                                if (!isNaN(tasa) && tasa > 100) {
+                                    guardarYMostrar(tasa, 'BCV Directo');
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                    throw new Error("No se encontró USD en el HTML");
+                }
+            } catch (e) { console.log("BCV Directo falló:", e); }
+            
+            // INTENTO 3: DolarAPI
             try {
                 tasaDisplay.innerHTML = "📡 Consultando DolarAPI...";
                 const response = await fetch(DOLARAPI_URL);
@@ -170,30 +185,15 @@
                     }
                 }
             } catch (e) { console.log("DolarAPI falló:", e); }
-            
-            // INTENTO 3: PyDolarVe
-            try {
-                tasaDisplay.innerHTML = "📡 Consultando PyDolarVe...";
-                const response = await fetch(PYDOLAR_URL);
-                if (response.ok) {
-                    const data = await response.json();
-                    const tasa = parseFloat(data.monitors?.usd?.price);
-                    if (!isNaN(tasa) && tasa > 100) {
-                        guardarYMostrar(tasa, 'PyDolarVe');
-                        return;
-                    }
-                }
-            } catch (e) { console.log("PyDolarVe falló:", e); }
         }
         
         // Si todo falla
         alertBox.style.display = 'block';
         tasaDisplay.innerHTML = '⚠️ Sin conexión a ninguna fuente';
-        sourceDisplay.innerText = 'Usa el botón "Forzar actualización" o ingresa manual';
+        sourceDisplay.innerText = 'Usa el botón "Forzar" o ingresa manual';
     }
 
     function forzarActualizacion() {
-        // Limpiar caché y forzar actualización desde BCV
         localStorage.removeItem('tasaBCV');
         localStorage.removeItem('fechaBCV');
         obtenerTasaBCV(true);
