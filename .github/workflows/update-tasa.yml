@@ -22,7 +22,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y python3 python3-lxml
-          echo "Instalación completada"
       
       - name: Descargar y extraer tasa del BCV
         id: extract
@@ -46,27 +45,19 @@ jobs:
               valor = elementos[0].text_content().strip()
               print(f"Valor encontrado: {valor}")
               
-              # PASO 1: Quitar puntos de miles (si los hay)
+              # Quitar puntos de miles (si los hay)
               valor_sin_puntos = valor.replace('.', '')
               print(f"Sin puntos: {valor_sin_puntos}")
               
-              # PASO 2: Reemplazar coma por punto para decimal
-              valor_normalizado = valor_sin_puntos.replace(',', '.')
-              print(f"Normalizado: {valor_normalizado}")
+              # Reemplazar coma por punto para decimal
+              valor_final = valor_sin_puntos.replace(',', '.')
+              print(f"Valor final: {valor_final}")
               
-              # PASO 3: Dividir entre 100000000 (como tu fórmula)
-              try:
-                  tasa = float(valor_normalizado) / 100000000
-                  print(f"Tasa final: {tasa}")
-                  
-                  with open('tasa.csv', 'w') as f:
-                      f.write(str(tasa))
-                  
-                  print(f"✅ tasa.csv: {tasa}")
-              except ValueError as e:
-                  print(f"ERROR: No se pudo convertir '{valor_normalizado}'")
-                  print(f"Detalle: {e}")
-                  exit(1)
+              # Guardar SIN dividir
+              with open('tasa.csv', 'w') as f:
+                  f.write(valor_final)
+              
+              print(f"✅ tasa.csv: {valor_final}")
           else:
               print("ERROR: No se encontró div#dolar")
               exit(1)
