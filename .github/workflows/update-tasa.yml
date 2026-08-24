@@ -29,58 +29,48 @@ jobs:
         run: |
           echo "Descargando página del BCV..."
           
-          # Descargar la página
           curl -k -s "https://www.bcv.org.ve/" -o bcv.html -H "User-Agent: Mozilla/5.0"
           
-          echo "Extrayendo tasa con XPath (igual que Google Sheets)..."
+          echo "Extrayendo tasa con XPath..."
           
-          # Usar Python con lxml para hacer el mismo XPath que Google Sheets
           python3 << 'EOF'
           from lxml import html
-          import re
           
-          # Leer el HTML
           with open('bcv.html', 'r', encoding='utf-8') as f:
               tree = html.fromstring(f.read())
           
-          # Usar el MISMO XPath que tu fórmula de Google Sheets
-          # //div[@id='dolar']//strong
+          # Mismo XPath que Google Sheets
           elementos = tree.xpath("//div[@id='dolar']//strong")
           
           if elementos:
               valor = elementos[0].text_content().strip()
               print(f"Valor encontrado: {valor}")
               
-              # Limpiar el valor (quitar puntos de miles)
-              valor_limpio = valor.replace('.', '')
+              # PASO 1: Quitar puntos de miles (si los hay)
+              valor_sin_puntos = valor.replace('.', '')
+              print(f"Sin puntos: {valor_sin_puntos}")
               
-              # Dividir entre 100000000 como hace tu fórmula
+              # PASO 2: Reemplazar coma por punto para decimal
+              valor_normalizado = valor_sin_puntos.replace(',', '.')
+              print(f"Normalizado: {valor_normalizado}")
+              
+              # PASO 3: Dividir entre 100000000 (como tu fórmula)
               try:
-                  tasa = float(valor_limpio) / 100000000
-                  print(f"Tasa calculada: {tasa}")
+                  tasa = float(valor_normalizado) / 100000000
+                  print(f"Tasa final: {tasa}")
                   
-                  # Guardar en archivo
                   with open('tasa.csv', 'w') as f:
                       f.write(str(tasa))
                   
-                  print(f"✅ Archivo tasa.csv creado con: {tasa}")
+                  print(f"✅ tasa.csv: {tasa}")
               except ValueError as e:
-                  print(f"ERROR al convertir: {valor_limpio}")
-                  print(f"Error: {e}")
+                  print(f"ERROR: No se pudo convertir '{valor_normalizado}'")
+                  print(f"Detalle: {e}")
                   exit(1)
           else:
-              print("ERROR: No se encontró el div con id='dolar'")
-              print("Buscando todos los divs disponibles...")
-              todos_divs = tree.xpath("//div[@id]")
-              for div in todos_divs[:10]:
-                  print(f"  - {div.get('id')}")
+              print("ERROR: No se encontró div#dolar")
               exit(1)
           EOF
-          
-          # Mostrar el resultado
-          echo ""
-          echo "=== Contenido de tasa.csv ==="
-          cat tasa.csv
       
       - name: Guardar cambios en GitHub
         run: |
@@ -88,7 +78,7 @@ jobs:
           git config --global user.email "actions@github.com"
           
           git add tasa.csv
-          git commit -m "BCV USD: $(cat tasa.csv) - $(date '+%Y-%m-%d %H:%M')" || echo "Sin cambios"
+          git commit -m "BCV: $(cat tasa.csv)" || echo "Sin cambios"
           git push origin main
           
-          echo "✅ ¡Actualización completada!"
+          echo "✅ ¡Listo!"
