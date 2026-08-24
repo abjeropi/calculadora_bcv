@@ -2,7 +2,10 @@ name: Actualizar Tasa BCV
 
 on:
   schedule:
-    - cron: '0 12 * * *'  # Todos los días a las 8am Venezuela (12:00 UTC)
+    # Cada 2 horas desde 6 AM hasta 8 PM (hora Venezuela = UTC-4)
+    # 6 AM = 10:00 UTC, 8 PM = 00:00 UTC
+    - cron: '0 10,12,14,16,18,20,22 * * *'
+    - cron: '0 0 * * *'  # Medianoche
   workflow_dispatch:  # Permite ejecutarlo manualmente
 
 jobs:
@@ -20,61 +23,65 @@ jobs:
       - name: Descargar página del BCV
         run: |
           echo "Descargando página del BCV..."
-          curl -k -s "https://www.bcv.org.ve/" -o bcv.html -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          curl -k -s "https://www.bcv.org.ve/" -o bcv.html -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
           echo "Descarga completada"
-          ls -la bcv.html
       
       - name: Extraer tasa del dólar USD
         id: extract
         run: |
           echo "Extrayendo tasa del DÓLAR (USD)..."
           
-          # Mostrar el HTML relevante para debug
-          echo "=== Buscando sección de tasas ==="
-          grep -i "usd\|dólar\|dollar" bcv.html | head -20
+          # Guardar HTML completo para debug
+          echo "=== HTML completo ==="
+          cat bcv.html
+          echo ""
+          echo "=== Buscando USD específicamente ==="
           
-          # Método 1: Buscar específicamente USD seguido de su valor
-          # El BCV tiene una estructura como: <td>USD</td><td>784.66330000</td>
-          TASA=$(grep -oP 'USD[^0-9]*\K[0-9]+\.[0-9]+' bcv.html | head -1 || echo "")
+          # Buscar el patrón: USD seguido de un número en la misma línea o líneas cercanas
+          # El BCV suele tener: <span>USD</span><span>784.6633</span>
+          TASA=$(grep -oP 'USD[^0-9]{0,50}?\K[0-9]{3}\.[0-9]{4,}' bcv.html | head -1 || echo "")
           
-          # Método 2: Si no funciona, buscar por símbolo $
+          # Si no funciona, buscar en contexto más amplio
           if [ -z "$TASA" ]; then
-            TASA=$(grep -oP '\$[^0-9]*\K[0-9]+\.[0-9]+' bcv.html | head -1 || echo "")
+            echo "Intentando método 2..."
+            TASA=$(grep -A5 'USD' bcv.html | grep -oP '[0-9]{3}\.[0-9]{4,}' | head -1 || echo "")
           fi
           
-          # Método 3: Buscar en tabla específica de tasas
+          # Si aún no funciona, buscar div por div
           if [ -z "$TASA" ]; then
-            TASA=$(grep -A2 -B2 "USD" bcv.html | grep -oP '[0-9]+\.[0-9]+' | head -1 || echo "")
+            echo "Intentando método 3..."
+            # Extraer todo el contenido y buscar USD seguido de número
+            TASA=$(cat bcv.html | tr '\n' ' ' | grep -oP 'USD.*?[0-9]{3}\.[0-9]{4,}' | grep -oP '[0-9]{3}\.[0-9]{4,}' | head -1 || echo "")
           fi
           
           echo "Tasa encontrada: $TASA"
           echo "tasa=$TASA" >> $GITHUB_OUTPUT
           
           if [ -z "$TASA" ]; then
-            echo "ERROR: No se pudo extraer la tasa del USD del BCV"
-            echo "=== Mostrando HTML relevante ==="
-            grep -i "usd\|euro\|eur" bcv.html | head -30
+            echo "ERROR: No se pudo extraer la tasa del USD"
+            echo "=== Mostrando todo el HTML ==="
+            cat bcv.html
+            exit 1
+          fi
+          
+          # Validar que sea un número razonable (entre 100 y 10000)
+          if ! echo "$TASA" | grep -qP '^[0-9]{3,4}\.[0-9]+$'; then
+            echo "ERROR: El valor extraído no parece válido: $TASA"
             exit 1
           fi
           
           # Guardar en archivo
           echo $TASA > tasa.csv
-          echo "Archivo tasa.csv creado con: $TASA"
+          echo "✅ Archivo tasa.csv actualizado con: $TASA"
           cat tasa.csv
           
       - name: Guardar cambios en GitHub
         run: |
-          echo "Configurando git..."
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
           
-          echo "Agregando cambios..."
           git add tasa.csv
-          
-          echo "Haciendo commit..."
-          git commit -m "Actualización automática BCV USD $(date +%Y-%m-%d)" || echo "Sin cambios nuevos"
-          
-          echo "Haciendo push..."
+          git commit -m "Actualización BCV USD: $(cat tasa.csv) - $(date '+%Y-%m-%d %H:%M')" || echo "Sin cambios"
           git push origin main
           
-          echo "¡Listo!"
+          echo "✅ ¡Actualización completada!"
