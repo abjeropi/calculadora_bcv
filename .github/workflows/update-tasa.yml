@@ -18,51 +18,70 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Descargar página del BCV
+      - name: Instalar Python y lxml
         run: |
-          echo "Descargando página del BCV..."
-          curl -k -s "https://www.bcv.org.ve/" -o bcv.html -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-          echo "Tamaño del archivo:"
-          ls -lh bcv.html
-          echo ""
-          echo "=== Primeras 500 líneas del HTML ==="
-          head -500 bcv.html
-          echo ""
-          echo "=== Buscando números con cualquier formato ==="
-          grep -oP '[0-9]+[.,][0-9]+' bcv.html | head -30
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-lxml
+          echo "Instalación completada"
       
-      - name: Extraer tasa del dólar USD
+      - name: Descargar y extraer tasa del BCV
         id: extract
         run: |
-          echo "Extrayendo tasa del DÓLAR..."
+          echo "Descargando página del BCV..."
           
-          # Mostrar todos los números encontrados
-          echo "=== Todos los números con decimales ==="
-          grep -oP '[0-9]+[.,][0-9]+' bcv.html | sort -u | head -50
+          # Descargar la página
+          curl -k -s "https://www.bcv.org.ve/" -o bcv.html -H "User-Agent: Mozilla/5.0"
           
-          # Buscar específicamente el valor del dólar (784.xxxx o similar)
-          # El BCV muestra: 784,66330000 (con coma como decimal)
-          TASA=$(grep -oP '[0-9]{3}[.,][0-9]{4,}' bcv.html | head -1 || echo "")
+          echo "Extrayendo tasa con XPath (igual que Google Sheets)..."
           
+          # Usar Python con lxml para hacer el mismo XPath que Google Sheets
+          python3 << 'EOF'
+          from lxml import html
+          import re
+          
+          # Leer el HTML
+          with open('bcv.html', 'r', encoding='utf-8') as f:
+              tree = html.fromstring(f.read())
+          
+          # Usar el MISMO XPath que tu fórmula de Google Sheets
+          # //div[@id='dolar']//strong
+          elementos = tree.xpath("//div[@id='dolar']//strong")
+          
+          if elementos:
+              valor = elementos[0].text_content().strip()
+              print(f"Valor encontrado: {valor}")
+              
+              # Limpiar el valor (quitar puntos de miles)
+              valor_limpio = valor.replace('.', '')
+              
+              # Dividir entre 100000000 como hace tu fórmula
+              try:
+                  tasa = float(valor_limpio) / 100000000
+                  print(f"Tasa calculada: {tasa}")
+                  
+                  # Guardar en archivo
+                  with open('tasa.csv', 'w') as f:
+                      f.write(str(tasa))
+                  
+                  print(f"✅ Archivo tasa.csv creado con: {tasa}")
+              except ValueError as e:
+                  print(f"ERROR al convertir: {valor_limpio}")
+                  print(f"Error: {e}")
+                  exit(1)
+          else:
+              print("ERROR: No se encontró el div con id='dolar'")
+              print("Buscando todos los divs disponibles...")
+              todos_divs = tree.xpath("//div[@id]")
+              for div in todos_divs[:10]:
+                  print(f"  - {div.get('id')}")
+              exit(1)
+          EOF
+          
+          # Mostrar el resultado
           echo ""
-          echo "=== Valor encontrado: $TASA ==="
-          echo "tasa=$TASA" >> $GITHUB_OUTPUT
-          
-          if [ -z "$TASA" ]; then
-            echo "ERROR: No se encontró la tasa"
-            echo "Buscando patrones alternativos..."
-            grep -oP '[0-9]{2,}[.,][0-9]{2,}' bcv.html | head -20
-            exit 1
-          fi
-          
-          # Normalizar: cambiar coma por punto si es necesario
-          TASA=$(echo $TASA | tr ',' '.')
-          
-          # Guardar en archivo
-          echo $TASA > tasa.csv
-          echo "✅ Tasa guardada: $TASA"
+          echo "=== Contenido de tasa.csv ==="
           cat tasa.csv
-          
+      
       - name: Guardar cambios en GitHub
         run: |
           git config --global user.name "GitHub Actions Bot"
@@ -72,4 +91,4 @@ jobs:
           git commit -m "BCV USD: $(cat tasa.csv) - $(date '+%Y-%m-%d %H:%M')" || echo "Sin cambios"
           git push origin main
           
-          echo "✅ ¡Listo!"
+          echo "✅ ¡Actualización completada!"
