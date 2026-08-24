@@ -20,40 +20,40 @@ jobs:
       - name: Descargar página del BCV
         run: |
           echo "Descargando página del BCV..."
-          # El flag -k ignora errores de certificado SSL
           curl -k -s "https://www.bcv.org.ve/" -o bcv.html -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
           echo "Descarga completada"
           ls -la bcv.html
-          echo "Primeras 100 líneas del HTML:"
-          head -100 bcv.html
       
-      - name: Extraer tasa del dólar
+      - name: Extraer tasa del dólar USD
         id: extract
         run: |
-          echo "Extrayendo tasa..."
+          echo "Extrayendo tasa del DÓLAR (USD)..."
           
-          # Método 1: Buscar por id="dolar"
-          TASA=$(grep -oP '(?<=id="dolar")[^>]*>.*?<strong[^>]*>\K[0-9.,]+' bcv.html | head -1 || echo "")
+          # Mostrar el HTML relevante para debug
+          echo "=== Buscando sección de tasas ==="
+          grep -i "usd\|dólar\|dollar" bcv.html | head -20
           
-          # Método 2: Buscar tabla de tasas con USD
+          # Método 1: Buscar específicamente USD seguido de su valor
+          # El BCV tiene una estructura como: <td>USD</td><td>784.66330000</td>
+          TASA=$(grep -oP 'USD[^0-9]*\K[0-9]+\.[0-9]+' bcv.html | head -1 || echo "")
+          
+          # Método 2: Si no funciona, buscar por símbolo $
           if [ -z "$TASA" ]; then
-            TASA=$(grep -oP 'USD.*?</td><td[^>]*>\K[0-9]+[.,][0-9]+' bcv.html | head -1 || echo "")
+            TASA=$(grep -oP '\$[^0-9]*\K[0-9]+\.[0-9]+' bcv.html | head -1 || echo "")
           fi
           
-          # Método 3: Buscar cualquier número que parezca tasa (3 dígitos, coma/punto, 4+ dígitos)
+          # Método 3: Buscar en tabla específica de tasas
           if [ -z "$TASA" ]; then
-            TASA=$(grep -oP '[0-9]{3}[.,][0-9]{4,}' bcv.html | head -1 || echo "")
+            TASA=$(grep -A2 -B2 "USD" bcv.html | grep -oP '[0-9]+\.[0-9]+' | head -1 || echo "")
           fi
-          
-          # Limpiar: quitar puntos de miles, dejar solo decimales
-          TASA=$(echo $TASA | tr -d '.' | sed 's/,/./')
           
           echo "Tasa encontrada: $TASA"
           echo "tasa=$TASA" >> $GITHUB_OUTPUT
           
           if [ -z "$TASA" ]; then
-            echo "ERROR: No se pudo extraer la tasa del BCV"
-            cat bcv.html | head -200
+            echo "ERROR: No se pudo extraer la tasa del USD del BCV"
+            echo "=== Mostrando HTML relevante ==="
+            grep -i "usd\|euro\|eur" bcv.html | head -30
             exit 1
           fi
           
@@ -72,7 +72,7 @@ jobs:
           git add tasa.csv
           
           echo "Haciendo commit..."
-          git commit -m "Actualización automática BCV $(date +%Y-%m-%d)" || echo "Sin cambios nuevos"
+          git commit -m "Actualización automática BCV USD $(date +%Y-%m-%d)" || echo "Sin cambios nuevos"
           
           echo "Haciendo push..."
           git push origin main
