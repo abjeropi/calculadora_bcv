@@ -3,10 +3,9 @@ name: Actualizar Tasa BCV
 on:
   schedule:
     # Cada 2 horas desde 6 AM hasta 8 PM (hora Venezuela = UTC-4)
-    # 6 AM = 10:00 UTC, 8 PM = 00:00 UTC
     - cron: '0 10,12,14,16,18,20,22 * * *'
     - cron: '0 0 * * *'  # Medianoche
-  workflow_dispatch:  # Permite ejecutarlo manualmente
+  workflow_dispatch:
 
 jobs:
   update-tasa:
@@ -26,41 +25,27 @@ jobs:
           curl -k -s "https://www.bcv.org.ve/" -o bcv.html -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
           echo "Descarga completada"
       
-      - name: Extraer tasa del dólar USD
+      - name: Extraer tasa del dólar USD (5to valor grande)
         id: extract
         run: |
-          echo "Extrayendo tasa del DÓLAR (USD)..."
+          echo "Extrayendo tasas del BCV..."
           
-          # Guardar HTML completo para debug
-          echo "=== HTML completo ==="
-          cat bcv.html
+          # Extraer TODOS los números con formato de tasa (3+ dígitos, punto, 4+ dígitos)
+          # Esto captura valores como: 916.00808978, 116.75668477, 784.66330000, etc.
+          echo "=== Todos los valores encontrados ==="
+          grep -oP '[0-9]{3,}\.[0-9]{4,}' bcv.html | head -20
+          
+          # Tomar el 5to valor (que es el USD según el orden del BCV)
+          TASA=$(grep -oP '[0-9]{3,}\.[0-9]{4,}' bcv.html | sed -n '5p')
+          
           echo ""
-          echo "=== Buscando USD específicamente ==="
-          
-          # Buscar el patrón: USD seguido de un número en la misma línea o líneas cercanas
-          # El BCV suele tener: <span>USD</span><span>784.6633</span>
-          TASA=$(grep -oP 'USD[^0-9]{0,50}?\K[0-9]{3}\.[0-9]{4,}' bcv.html | head -1 || echo "")
-          
-          # Si no funciona, buscar en contexto más amplio
-          if [ -z "$TASA" ]; then
-            echo "Intentando método 2..."
-            TASA=$(grep -A5 'USD' bcv.html | grep -oP '[0-9]{3}\.[0-9]{4,}' | head -1 || echo "")
-          fi
-          
-          # Si aún no funciona, buscar div por div
-          if [ -z "$TASA" ]; then
-            echo "Intentando método 3..."
-            # Extraer todo el contenido y buscar USD seguido de número
-            TASA=$(cat bcv.html | tr '\n' ' ' | grep -oP 'USD.*?[0-9]{3}\.[0-9]{4,}' | grep -oP '[0-9]{3}\.[0-9]{4,}' | head -1 || echo "")
-          fi
-          
-          echo "Tasa encontrada: $TASA"
+          echo "=== Valor seleccionado (5to): $TASA ==="
           echo "tasa=$TASA" >> $GITHUB_OUTPUT
           
           if [ -z "$TASA" ]; then
-            echo "ERROR: No se pudo extraer la tasa del USD"
-            echo "=== Mostrando todo el HTML ==="
-            cat bcv.html
+            echo "ERROR: No se pudo extraer el 5to valor"
+            echo "Total de valores encontrados:"
+            grep -oP '[0-9]{3,}\.[0-9]{4,}' bcv.html | wc -l
             exit 1
           fi
           
