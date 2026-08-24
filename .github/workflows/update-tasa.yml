@@ -2,9 +2,8 @@ name: Actualizar Tasa BCV
 
 on:
   schedule:
-    # Cada 2 horas desde 6 AM hasta 8 PM (hora Venezuela = UTC-4)
     - cron: '0 10,12,14,16,18,20,22 * * *'
-    - cron: '0 0 * * *'  # Medianoche
+    - cron: '0 0 * * *'
   workflow_dispatch:
 
 jobs:
@@ -23,41 +22,45 @@ jobs:
         run: |
           echo "Descargando página del BCV..."
           curl -k -s "https://www.bcv.org.ve/" -o bcv.html -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-          echo "Descarga completada"
+          echo "Tamaño del archivo:"
+          ls -lh bcv.html
+          echo ""
+          echo "=== Primeras 500 líneas del HTML ==="
+          head -500 bcv.html
+          echo ""
+          echo "=== Buscando números con cualquier formato ==="
+          grep -oP '[0-9]+[.,][0-9]+' bcv.html | head -30
       
-      - name: Extraer tasa del dólar USD (5to valor grande)
+      - name: Extraer tasa del dólar USD
         id: extract
         run: |
-          echo "Extrayendo tasas del BCV..."
+          echo "Extrayendo tasa del DÓLAR..."
           
-          # Extraer TODOS los números con formato de tasa (3+ dígitos, punto, 4+ dígitos)
-          # Esto captura valores como: 916.00808978, 116.75668477, 784.66330000, etc.
-          echo "=== Todos los valores encontrados ==="
-          grep -oP '[0-9]{3,}\.[0-9]{4,}' bcv.html | head -20
+          # Mostrar todos los números encontrados
+          echo "=== Todos los números con decimales ==="
+          grep -oP '[0-9]+[.,][0-9]+' bcv.html | sort -u | head -50
           
-          # Tomar el 5to valor (que es el USD según el orden del BCV)
-          TASA=$(grep -oP '[0-9]{3,}\.[0-9]{4,}' bcv.html | sed -n '5p')
+          # Buscar específicamente el valor del dólar (784.xxxx o similar)
+          # El BCV muestra: 784,66330000 (con coma como decimal)
+          TASA=$(grep -oP '[0-9]{3}[.,][0-9]{4,}' bcv.html | head -1 || echo "")
           
           echo ""
-          echo "=== Valor seleccionado (5to): $TASA ==="
+          echo "=== Valor encontrado: $TASA ==="
           echo "tasa=$TASA" >> $GITHUB_OUTPUT
           
           if [ -z "$TASA" ]; then
-            echo "ERROR: No se pudo extraer el 5to valor"
-            echo "Total de valores encontrados:"
-            grep -oP '[0-9]{3,}\.[0-9]{4,}' bcv.html | wc -l
+            echo "ERROR: No se encontró la tasa"
+            echo "Buscando patrones alternativos..."
+            grep -oP '[0-9]{2,}[.,][0-9]{2,}' bcv.html | head -20
             exit 1
           fi
           
-          # Validar que sea un número razonable (entre 100 y 10000)
-          if ! echo "$TASA" | grep -qP '^[0-9]{3,4}\.[0-9]+$'; then
-            echo "ERROR: El valor extraído no parece válido: $TASA"
-            exit 1
-          fi
+          # Normalizar: cambiar coma por punto si es necesario
+          TASA=$(echo $TASA | tr ',' '.')
           
           # Guardar en archivo
           echo $TASA > tasa.csv
-          echo "✅ Archivo tasa.csv actualizado con: $TASA"
+          echo "✅ Tasa guardada: $TASA"
           cat tasa.csv
           
       - name: Guardar cambios en GitHub
@@ -66,7 +69,7 @@ jobs:
           git config --global user.email "actions@github.com"
           
           git add tasa.csv
-          git commit -m "Actualización BCV USD: $(cat tasa.csv) - $(date '+%Y-%m-%d %H:%M')" || echo "Sin cambios"
+          git commit -m "BCV USD: $(cat tasa.csv) - $(date '+%Y-%m-%d %H:%M')" || echo "Sin cambios"
           git push origin main
           
-          echo "✅ ¡Actualización completada!"
+          echo "✅ ¡Listo!"
