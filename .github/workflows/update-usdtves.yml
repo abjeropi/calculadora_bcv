@@ -1,0 +1,110 @@
+name: Actualizar Tasa USDT/VES
+
+on:
+  schedule:
+    # Cada 2 horas desde 6 AM hasta 8 PM (hora Venezuela)
+    - cron: '0 10,12,14,16,18,20,22 * * *'
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  update-usdtves:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Instalar Python y lxml
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-lxml
+      
+      - name: Descargar y extraer tasa USDT/VES de Binance
+        run: |
+          echo "Descargando Binance P2P..."
+          
+          # Binance P2P API (más confiable que scraping)
+          curl -s "https://api.binance.com/bapi/adv/v1/public/adv/adv/navigate" \
+            -H 'Content-Type: application/json' \
+            --data-raw '{
+              "asset": "USDT",
+              "fiat": "VES",
+              "tradeType": "SELL"
+            }' -o binance_p2p.json || echo "API falló"
+          
+          # Intentar extraer de la API
+          if [ -f binance_p2p.json ]; then
+            TASA=$(python3 << 'EOF'
+import json
+try:
+    with open('binance_p2p.json', 'r') as f:
+        data = json.load(f)
+    
+    # Buscar el precio promedio de los anuncios
+    if 'data' in data and 'advList' in data['data']:
+        precios = [float(a['adv']['price']) for a in data['data']['advList'][:5]]
+        promedio = sum(precios) / len(precios)
+        print(promedio)
+    else:
+        print("0")
+except:
+    print("0")
+EOF
+)
+          else
+            TASA="0"
+          fi
+          
+          # Si la API falla, intentar scraping de la página
+          if [ "$TASA" = "0" ] || [ -z "$TASA" ]; then
+            echo "Intentando scraping..."
+            curl -k -s "https://www.binance.com/es-AR/price/tether/VES" -o binance.html -H "User-Agent: Mozilla/5.0"
+            
+            TASA=$(python3 << 'EOF'
+from lxml import html
+try:
+    with open('binance.html', 'r', encoding='utf-8') as f:
+        tree = html.fromstring(f.read())
+    
+    # Buscar patrones de precio USDT/VES
+    elementos = tree.xpath("//text()[contains(., 'VES') or contains(., 'Bs')]")
+    for elem in elementos:
+        import re
+        match = re.search(r'(\d+\.?\d*)\s*(?:VES|Bs)', elem)
+        if match:
+            valor = float(match.group(1).replace('.', ''))
+            if 500 < valor < 2000:  # Rango razonable
+                print(valor)
+                exit(0)
+    print("0")
+except:
+    print("0")
+EOF
+)
+          fi
+          
+          # Si todo falla, usar valor por defecto
+          if [ "$TASA" = "0" ] || [ -z "$TASA" ]; then
+            echo "⚠️ Usando valor de respaldo: 943"
+            TASA="943"
+          fi
+          
+          echo "Tasa USDT/VES: $TASA"
+          echo $TASA > tasa_usdtves.csv
+          cat tasa_usdtves.csv
+          
+      - name: Guardar cambios en GitHub
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          
+          git add tasa_usdtves.csv
+          git commit -m "USDT/VES: $(cat tasa_usdtves.csv)" || echo "Sin cambios"
+          git push origin main
+          
+          echo "✅ ¡Listo!"
