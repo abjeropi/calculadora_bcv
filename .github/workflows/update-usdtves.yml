@@ -30,29 +30,34 @@ jobs:
           with open('binance.html', 'r', encoding='utf-8') as f:
               html = f.read()
           
-          # Buscar el script __APP_DATA
-          match = re.search(r'<script id="__APP_DATA" type="application/json">(.*?)</script>', html, re.DOTALL)
+          # Regex corregida: permite atributos extra como 'nonce' entre el id y el cierre >
+          match = re.search(r'<script id="__APP_DATA"[^>]*>(.*?)</script>', html, re.DOTALL)
           
           if not match:
-              print("ERROR: No se encontró __APP_DATA")
+              print("ERROR: No se encontró el script __APP_DATA")
               exit(1)
           
           json_str = match.group(1)
-          data = json.loads(json_str)
           
-          # Navegar al valor c2cConvertData.price
-          price = data.get('appState', {}).get('loader', {}).get('dataByRouteId', {}).get('082e', {}).get('c2cConvertData', {}).get('price')
-          
-          if not price:
-              print("ERROR: No se encontró c2cConvertData.price")
+          try:
+              data = json.loads(json_str)
+              
+              # Navegar al valor c2cConvertData.price
+              price = data.get('appState', {}).get('loader', {}).get('dataByRouteId', {}).get('082e', {}).get('c2cConvertData', {}).get('price')
+              
+              if not price:
+                  print("ERROR: No se encontró c2cConvertData.price en el JSON")
+                  exit(1)
+              
+              print(f"Tasa encontrada: {price}")
+              
+              with open('tasa_usdtves.csv', 'w') as f:
+                  f.write(str(price))
+              
+              print(f"✅ Guardado: {price}")
+          except json.JSONDecodeError as e:
+              print(f"ERROR al parsear JSON: {e}")
               exit(1)
-          
-          print(f"Tasa encontrada: {price}")
-          
-          with open('tasa_usdtves.csv', 'w') as f:
-              f.write(str(price))
-          
-          print(f"✅ Guardado: {price}")
           EOF
       
       - name: Commit
