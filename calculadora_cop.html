@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cambio VES a COP</title>
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="apple-touch-icon" href="favicon.png">
+    <style>
+        body { font-family: system-ui, sans-serif; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 10px; }
+        .container { background-color: rgba(45, 45, 45, 0.95); padding: 25px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.3); width: 100%; max-width: 400px; }
+        h2 { text-align: center; color: #FFCD00; margin-top: 0; font-size: 1.8em; } /* Amarillo Colombia */
+        .tasa-info { text-align: center; font-size: 0.95em; background-color: #1e1e1e; padding: 10px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #FFCD00; }
+        .fecha-actualizacion { font-size: 0.8em; color: #888; margin-top: 5px; }
+        .input-group { margin-bottom: 18px; }
+        label { display: block; margin-bottom: 6px; font-weight: bold; color: #ccc; font-size: 0.9em; }
+        input[type="number"] { width: 100%; padding: 14px; font-size: 1.3em; border: 2px solid #444; border-radius: 10px; background-color: #1e1e1e; color: white; box-sizing: border-box; outline: none; }
+        input[type="number"]:focus { border-color: #FFCD00; }
+        
+        /* Estilos del Slider de Ajuste */
+        .ajuste-container { background-color: #2a2a2a; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
+        .ajuste-header { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.9em; color: #FFCD00; font-weight: bold; }
+        input[type="range"] { width: 100%; cursor: pointer; accent-color: #FFCD00; }
+        
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; }
+        .refresh-btn { flex: 1; padding: 12px; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; background-color: #FFCD00; color: #1e1e1e; }
+        .alert { background-color: #ff5722; color: white; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.85em; text-align: center; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🇴 Cambio VES a COP</h2>
+    <div class="alert" id="alert">⚠️ Error al obtener tasas</div>
+    
+    <div class="tasa-info" id="tasa-display">
+        Calculando cruce...
+        <div class="fecha-actualizacion" id="fecha-display"></div>
+    </div>
+
+    <div class="ajuste-container">
+        <div class="ajuste-header">
+            <span>Ajuste de mercado (Calle)</span>
+            <span id="ajuste-valor">0%</span>
+        </div>
+        <input type="range" id="ajuste-slider" min="-15" max="15" value="0" step="1">
+    </div>
+    
+    <div class="input-group">
+        <label for="ves">🇪 Bolívares (VES)</label>
+        <input type="number" id="ves" placeholder="0.00" step="0.01">
+    </div>
+
+    <div class="input-group">
+        <label for="cop">🇨🇴 Pesos Colombianos (COP)</label>
+        <input type="number" id="cop" placeholder="0.00" step="0.01">
+    </div>
+
+    <button class="refresh-btn" onclick="cargarTasas()">🔄 Actualizar Tasas</button>
+</div>
+
+<script>
+    // Fuentes de datos
+    const TASA_BCV_URL = "https://raw.githubusercontent.com/abjeropi/calculadora_bcv/main/tasa.csv";
+    // API gratuita y confiable para el Peso Colombiano (Banco Central de Alemania, datos globales)
+    const API_COP_URL = "https://api.frankfurter.app/latest?from=USD&to=COP";
+
+    let tasaBase = 0; // Tasa de cruce matemática
+    let tasaAjustada = 0; // Tasa con el porcentaje de la calle
+    const vesInput = document.getElementById('ves');
+    const copInput = document.getElementById('cop');
+    const tasaDisplay = document.getElementById('tasa-display');
+    const fechaDisplay = document.getElementById('fecha-display');
+    const alertBox = document.getElementById('alert');
+    const slider = document.getElementById('ajuste-slider');
+    const ajusteValor = document.getElementById('ajuste-valor');
+
+    window.onload = function() {
+        cargarTasas();
+    };
+
+    slider.addEventListener('input', function() {
+        const porcentaje = parseInt(this.value);
+        ajusteValor.innerText = (porcentaje > 0 ? '+' : '') + porcentaje + '%';
+        recalcularTasaAjustada(porcentaje);
+        // Recalcular los inputs si hay valores
+        if (vesInput.value) convertirDesdeVES();
+        if (copInput.value) convertirDesdeCOP();
+    });
+
+    async function cargarTasas() {
+        tasaDisplay.innerHTML = "🔄 Obteniendo tasas...";
+        alertBox.style.display = 'none';
+        
+        try {
+            // 1. Obtener USD/VES de nuestro GitHub
+            const resBCV = await fetch(TASA_BCV_URL + '?t=' + Date.now());
+            if (!resBCV.ok) throw new Error("BCV");
+            const usdVES = parseFloat((await resBCV.text()).trim());
+
+            // 2. Obtener USD/COP de la API internacional
+            const resCOP = await fetch(API_COP_URL);
+            if (!resCOP.ok) throw new Error("COP");
+            const dataCOP = await resCOP.json();
+            const usdCOP = dataCOP.rates.COP;
+
+            if (usdVES > 100 && usdCOP > 1000) {
+                // 3. Calcular el Cruce Matemático: (USD/COP) / (USD/VES)
+                tasaBase = usdCOP / usdVES;
+                
+                const fecha = new Date().toLocaleString('es-VE');
+                fechaDisplay.innerText = `Actualizado: ${fecha}`;
+                
+                // Resetear slider a 0 y calcular
+                slider.value = 0;
+                ajusteValor.innerText = '0%';
+                recalcularTasaAjustada(0);
+                
+                if (vesInput.value) convertirDesdeVES();
+                if (copInput.value) convertirDesdeCOP();
+            } else {
+                throw new Error("Valores fuera de rango");
+            }
+        } catch (error) {
+            console.error(error);
+            alertBox.style.display = 'block';
+            tasaDisplay.innerHTML = '⚠️ Error de conexión';
+        }
+    }
+
+    function recalcularTasaAjustada(porcentaje) {
+        // Aplicar el porcentaje de ajuste (positivo o negativo)
+        tasaAjustada = tasaBase * (1 + (porcentaje / 100));
+        tasaDisplay.innerHTML = `Tasa Base: ${tasaBase.toFixed(4)} COP/VES<br><strong style="color:#FFCD00; font-size:1.2em;">Tasa Ajustada: ${tasaAjustada.toFixed(4)} COP/VES</strong>`;
+    }
+
+    function convertirDesdeVES() {
+        if (tasaAjustada > 0 && vesInput.value) {
+            copInput.value = (vesInput.value * tasaAjustada).toFixed(2);
+        }
+    }
+
+    function convertirDesdeCOP() {
+        if (tasaAjustada > 0 && copInput.value) {
+            vesInput.value = (copInput.value / tasaAjustada).toFixed(2);
+        }
+    }
+
+    vesInput.addEventListener('input', convertirDesdeVES);
+    copInput.addEventListener('input', convertirDesdeCOP);
+</script>
+
+</body>
+</html>
