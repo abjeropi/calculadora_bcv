@@ -16,40 +16,57 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Extraer tasa
+      - name: Instalar dependencias
         run: |
-          curl -s -X POST "https://api.binance.com/bapi/adv/v1/public/adv/adv/navigate" -H "Content-Type: application/json" -d '{"asset":"USDT","fiat":"VES","tradeType":"SELL"}' > binance.json
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-lxml
+      
+      - name: Scraping Binance
+        run: |
+          echo "Descargando página de Binance..."
+          curl -k -s "https://www.binance.com/es-AR/price/tether/VES" -o binance.html -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
           
-      - name: Procesar
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            try {
-              const data = JSON.parse(fs.readFileSync('binance.json', 'utf8'));
-              let tasa = 943; // valor por defecto
+          python3 << 'EOF'
+          from lxml import html
+          import re
+          
+          try:
+              with open('binance.html', 'r', encoding='utf-8') as f:
+                  tree = html.fromstring(f.read())
               
-              if (data.data && data.data.advList && data.data.advList.length > 0) {
-                const precios = data.data.advList.slice(0, 5)
-                  .map(a => parseFloat(a.adv.price))
-                  .filter(p => p > 500 && p < 2000);
-                
-                if (precios.length > 0) {
-                  tasa = precios.reduce((a, b) => a + b, 0) / precios.length;
-                }
-              }
+              # Buscar el valor USDT/VES en la página
+              # Binance suele mostrarlo en formato: "942.75 VES" o similar
+              texto = tree.text_content()
               
-              fs.writeFileSync('tasa_usdtves.csv', tasa.toFixed(2));
-              console.log('Tasa:', tasa.toFixed(2));
-            } catch (e) {
-              fs.writeFileSync('tasa_usdtves.csv', '943');
-              console.log('Error, usando 943');
-            }
+              # Buscar patrón de número con decimales seguido de VES
+              match = re.search(r'(\d+[.,]\d{2})\s*VES', texto)
+              
+              if match:
+                  tasa_str = match.group(1).replace(',', '.')
+                  tasa = float(tasa_str)
+                  
+                  if 500 < tasa < 2000:
+                      print(f"Tasa encontrada: {tasa}")
+                      with open('tasa_usdtves.csv', 'w') as f:
+                          f.write(f"{tasa:.2f}")
+                  else:
+                      print(f"Valor fuera de rango: {tasa}")
+                      with open('tasa_usdtves.csv', 'w') as f:
+                          f.write("943.00")
+              else:
+                  print("No se encontró el patrón")
+                  with open('tasa_usdtves.csv', 'w') as f:
+                      f.write("943.00")
+          except Exception as e:
+              print(f"Error: {e}")
+              with open('tasa_usdtves.csv', 'w') as f:
+                  f.write("943.00")
+          EOF
       
       - name: Commit
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
           git add tasa_usdtves.csv
-          git commit -m "Actualizacion USDT/VES" || echo "Sin cambios"
+          git commit -m "USDT/VES: $(cat tasa_usdtves.csv)" || echo "Sin cambios"
           git push
