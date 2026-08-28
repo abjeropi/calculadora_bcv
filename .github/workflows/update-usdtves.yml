@@ -3,6 +3,7 @@ name: Actualizar Tasa USDT/VES
 on:
   schedule:
     - cron: '0 10,12,14,16,18,20,22 * * *'
+    - cron: '0 0 * * *'
   workflow_dispatch:
 
 jobs:
@@ -15,36 +16,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Extraer tasa de Binance
+      - name: Descargar usdt.com.ve
         run: |
-          curl -k -s "https://www.binance.com/es-LA/price/tether/VES" -o binance.html -H "User-Agent: Mozilla/5.0"
-          
+          curl -k -s "https://www.usdt.com.ve/" -o usdt.html -H "User-Agent: Mozilla/5.0"
+      
+      - name: Extraer tasa
+        run: |
           python3 << 'EOF'
-import json
-import re
-
-with open('binance.html', 'r', encoding='utf-8') as f:
-    html = f.read()
-
-# Buscar el script __APP_DATA
-match = re.search(r'<script id="__APP_DATA"[^>]*>(.*?)</script>', html, re.DOTALL)
-
-if not match:
-    print("ERROR: No se encontró __APP_DATA")
-    exit(1)
-
-data = json.loads(match.group(1))
-
-# Navegar al c2cConvertData.price
-price = data['appState']['loader']['dataByRouteId']['082e']['coin']['c2cConvertData']['price']
-
-print(f"Tasa encontrada: {price}")
-
-with open('tasa_usdtves.csv', 'w') as f:
-    f.write(str(price))
-
-print(f"✅ Guardado: {price}")
-EOF
+          import re
+          
+          with open('usdt.html', 'r', encoding='utf-8') as f:
+              html = f.read()
+          
+          # Buscar "Dólar Binance Hoy en Venezuela: 940,32"
+          match = re.search(r'Dólar Binance.*?([0-9]+[.,][0-9]+)\s*por\s*USDT', html)
+          
+          if match:
+              tasa = match.group(1).replace(',', '.')
+              print(f"Tasa encontrada: {tasa}")
+              
+              with open('tasa_usdtves.csv', 'w') as f:
+                  f.write(tasa)
+          else:
+              print("ERROR: No se encontró la tasa")
+              exit(1)
+          EOF
       
       - name: Commit
         run: |
