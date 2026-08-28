@@ -16,41 +16,65 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Extraer tasa de Binance
+      - name: Descargar página de Binance
         run: |
           echo "Descargando página de Binance..."
-          curl -k -s "https://www.binance.com/es-LA/price/tether/VES" -o binance.html -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-          
-          echo "Extrayendo tasa del JSON embebido..."
+          curl -k -s "https://www.binance.com/es-LA/price/tether/VES" -o binance.html -H "User-Agent: Mozilla/5.0"
+          echo "Página descargada"
+      
+      - name: Extraer tasa del JSON embebido
+        run: |
+          echo "Extrayendo tasa USDT/VES..."
           
           python3 << 'EOF'
           import re
           import json
           
+          # Leer el archivo HTML
           with open('binance.html', 'r', encoding='utf-8') as f:
-              html = f.read()
+              html_content = f.read()
           
-          # Buscar el JSON de c2cConvertData
-          match = re.search(r'"c2cConvertData":\s*\{[^}]*"price":\s*([\d.]+)', html)
+          # Buscar el script __APP_DATA que contiene el JSON
+          match = re.search(r'<script id="__APP_DATA" type="application/json">(.*?)</script>', html_content, re.DOTALL)
           
           if match:
-              price = float(match.group(1))
-              print(f"Tasa encontrada: {price}")
-              
-              # Validar que esté en rango razonable (500-2000)
-              if 500 < price < 2000:
-                  with open('tasa_usdtves.csv', 'w') as f:
-                      f.write(f"{price:.3f}")
-                  print(f"✅ Guardado: {price:.3f}")
-              else:
-                  print(f" Valor fuera de rango: {price}")
+              json_str = match.group(1)
+              try:
+                  data = json.loads(json_str)
+                  
+                  # Navegar por la estructura JSON para encontrar c2cConvertData
+                  c2c_data = data.get('pageData', {}).get('shuviInitialState', {}).get('actGlobal', {}).get('ssrData', {}).get('pageData', {}).get('shuviInitialState', {}).get('actGlobal', {}).get('ssrData', {}).get('coin', {}).get('c2cConvertData')
+                  
+                  if not c2c_data:
+                      # Intentar otra ruta en el JSON
+                      c2c_data = data.get('ssrData', {}).get('pageData', {}).get('shuviInitialState', {}).get('actGlobal', {}).get('ssrData', {}).get('coin', {}).get('c2cConvertData')
+                  
+                  if c2c_data:
+                      price = c2c_data.get('price')
+                      if price:
+                          print(f"Tasa encontrada: {price}")
+                          with open('tasa_usdtves.csv', 'w') as f:
+                              f.write(str(price))
+                          print(f"✅ Guardado en tasa_usdtves.csv: {price}")
+                      else:
+                          print("ERROR: No se encontró el campo 'price' en c2cConvertData")
+                          exit(1)
+                  else:
+                      print("ERROR: No se encontró c2cConvertData en el JSON")
+                      # Imprimir todas las claves disponibles para debug
+                      print("Claves disponibles en coin:")
+                      coin_data = data.get('pageData', {}).get('shuviInitialState', {}).get('actGlobal', {}).get('ssrData', {}).get('pageData', {}).get('shuviInitialState', {}).get('actGlobal', {}).get('ssrData', {}).get('coin', {})
+                      print(list(coin_data.keys()) if coin_data else "Ninguna")
+                      exit(1)
+              except json.JSONDecodeError as e:
+                  print(f"ERROR al parsear JSON: {e}")
                   exit(1)
           else:
-              print(" No se encontró c2cConvertData en el HTML")
+              print("ERROR: No se encontró el script __APP_DATA")
               exit(1)
           EOF
       
-      - name: Commit
+      - name: Commit a GitHub
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
