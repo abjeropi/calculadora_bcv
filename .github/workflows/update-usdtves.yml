@@ -15,9 +15,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Extraer tasa USDT/VES
+      - name: Extraer tasa de Binance
         run: |
-          echo "Descargando Binance..."
           curl -k -s "https://www.binance.com/es-LA/price/tether/VES" -o binance.html -H "User-Agent: Mozilla/5.0"
           
           python3 << 'EOF'
@@ -34,22 +33,17 @@ if not match:
     print("ERROR: No se encontró __APP_DATA")
     exit(1)
 
-try:
-    data = json.loads(match.group(1))
-    
-    # Navegar al precio
-    price = data['appState']['loader']['dataByRouteId']['082e']['coin']['c2cConvertData']['price']
-    
-    print(f"Tasa encontrada: {price}")
-    
-    with open('tasa_usdtves.csv', 'w') as f:
-        f.write(str(price))
-    
-    print(f"✅ Guardado: {price}")
-    
-except Exception as e:
-    print(f"ERROR: {e}")
-    exit(1)
+data = json.loads(match.group(1))
+
+# Navegar al c2cConvertData.price
+price = data['appState']['loader']['dataByRouteId']['082e']['coin']['c2cConvertData']['price']
+
+print(f"Tasa encontrada: {price}")
+
+with open('tasa_usdtves.csv', 'w') as f:
+    f.write(str(price))
+
+print(f"✅ Guardado: {price}")
 EOF
       
       - name: Commit
