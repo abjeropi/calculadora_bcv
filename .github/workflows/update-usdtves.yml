@@ -3,7 +3,6 @@ name: Actualizar Tasa USDT/VES
 on:
   schedule:
     - cron: '0 10,12,14,16,18,20,22 * * *'
-    - cron: '0 0 * * *'
   workflow_dispatch:
 
 jobs:
@@ -16,71 +15,42 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Descargar Binance
+      - name: Extraer tasa USDT/VES
         run: |
+          echo "Descargando Binance..."
           curl -k -s "https://www.binance.com/es-LA/price/tether/VES" -o binance.html -H "User-Agent: Mozilla/5.0"
-      
-      - name: Extraer tasa
-        run: |
+          
           python3 << 'EOF'
-          import re
-          import json
-          
-          with open('binance.html', 'r', encoding='utf-8') as f:
-              html = f.read()
-          
-          # Buscar el script __APP_DATA
-          match = re.search(r'<script id="__APP_DATA"[^>]*>(.*?)</script>', html, re.DOTALL)
-          
-          if not match:
-              print("ERROR: No se encontró __APP_DATA")
-              exit(1)
-          
-          try:
-              data = json.loads(match.group(1))
-              
-              # Navegar al c2cConvertData.price
-              price = None
-              
-              # Intentar diferentes rutas
-              if 'appState' in data and 'loader' in data['appState']:
-                  for route_id, route_data in data['appState']['loader'].get('dataByRouteId', {}).items():
-                      if 'coin' in route_data and 'c2cConvertData' in route_data['coin']:
-                          price = route_data['coin']['c2cConvertData'].get('price')
-                          break
-              
-              # Si no lo encontró, buscar en pageData
-              if not price and 'pageData' in data:
-                  page_data = data['pageData']
-                  if 'shuviInitialState' in page_data:
-                      shuvi = page_data['shuviInitialState']
-                      if 'actGlobal' in shuvi and 'ssrData' in shuvi['actGlobal']:
-                          ssr_data = shuvi['actGlobal']['ssrData']
-                          if 'pageData' in ssr_data:
-                              page_data2 = ssr_data['pageData']
-                              if 'shuviInitialState' in page_data2:
-                                  shuvi2 = page_data2['shuviInitialState']
-                                  if 'actGlobal' in shuvi2 and 'ssrData' in shuvi2['actGlobal']:
-                                      ssr_data2 = shuvi2['actGlobal']['ssrData']
-                                      if 'coin' in ssr_data2 and 'c2cConvertData' in ssr_data2['coin']:
-                                          price = ssr_data2['coin']['c2cConvertData'].get('price')
-              
-              if not price:
-                  print("ERROR: No se encontró c2cConvertData.price")
-                  print("Claves disponibles en appState:", list(data.get('appState', {}).keys()))
-                  exit(1)
-              
-              print(f"Tasa encontrada: {price}")
-              
-              with open('tasa_usdtves.csv', 'w') as f:
-                  f.write(str(price))
-              
-              print(f"✅ Guardado: {price}")
-              
-          except json.JSONDecodeError as e:
-              print(f"ERROR JSON: {e}")
-              exit(1)
-          EOF
+import json
+import re
+
+with open('binance.html', 'r', encoding='utf-8') as f:
+    html = f.read()
+
+# Buscar el script __APP_DATA
+match = re.search(r'<script id="__APP_DATA"[^>]*>(.*?)</script>', html, re.DOTALL)
+
+if not match:
+    print("ERROR: No se encontró __APP_DATA")
+    exit(1)
+
+try:
+    data = json.loads(match.group(1))
+    
+    # Navegar al precio
+    price = data['appState']['loader']['dataByRouteId']['082e']['coin']['c2cConvertData']['price']
+    
+    print(f"Tasa encontrada: {price}")
+    
+    with open('tasa_usdtves.csv', 'w') as f:
+        f.write(str(price))
+    
+    print(f"✅ Guardado: {price}")
+    
+except Exception as e:
+    print(f"ERROR: {e}")
+    exit(1)
+EOF
       
       - name: Commit
         run: |
