@@ -3,7 +3,6 @@ name: Actualizar Tasa USDT/VES
 on:
   schedule:
     - cron: '0 10,12,14,16,18,20,22 * * *'
-    - cron: '0 0 * * *'
   workflow_dispatch:
 
 jobs:
@@ -16,49 +15,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Extraer tasa de Binance
+      - name: Extraer tasa
         run: |
-          echo "Descargando página de Binance..."
-          curl -k -s "https://www.binance.com/es-LA/price/tether/VES" -o binance.html -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          curl -k -s "https://www.binance.com/es-LA/price/tether/VES" -o binance.html -H "User-Agent: Mozilla/5.0"
           
-          echo "Extrayendo tasa del JSON..."
+          # Buscar el patrón "price":942.745 en el JSON
+          TASA=$(grep -oP '"price":\s*\K[0-9]+\.[0-9]+' binance.html | head -1)
           
-          python3 << 'EOF'
-          import re
-          import json
+          if [ -z "$TASA" ]; then
+            echo "ERROR: No se encontró la tasa"
+            exit 1
+          fi
           
-          with open('binance.html', 'r', encoding='utf-8') as f:
-              html = f.read()
-          
-          # Regex corregida: permite atributos extra como 'nonce' entre el id y el cierre >
-          match = re.search(r'<script id="__APP_DATA"[^>]*>(.*?)</script>', html, re.DOTALL)
-          
-          if not match:
-              print("ERROR: No se encontró el script __APP_DATA")
-              exit(1)
-          
-          json_str = match.group(1)
-          
-          try:
-              data = json.loads(json_str)
-              
-              # Navegar al valor c2cConvertData.price
-              price = data.get('appState', {}).get('loader', {}).get('dataByRouteId', {}).get('082e', {}).get('c2cConvertData', {}).get('price')
-              
-              if not price:
-                  print("ERROR: No se encontró c2cConvertData.price en el JSON")
-                  exit(1)
-              
-              print(f"Tasa encontrada: {price}")
-              
-              with open('tasa_usdtves.csv', 'w') as f:
-                  f.write(str(price))
-              
-              print(f"✅ Guardado: {price}")
-          except json.JSONDecodeError as e:
-              print(f"ERROR al parsear JSON: {e}")
-              exit(1)
-          EOF
+          echo "Tasa encontrada: $TASA"
+          echo "$TASA" > tasa_usdtves.csv
+          cat tasa_usdtves.csv
       
       - name: Commit
         run: |
