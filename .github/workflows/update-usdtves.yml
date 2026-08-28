@@ -16,51 +16,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Instalar dependencias
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3 python3-lxml
-      
-      - name: Scraping Binance
+      - name: Extraer tasa de Binance
         run: |
           echo "Descargando página de Binance..."
-          curl -k -s "https://www.binance.com/es-AR/price/tether/VES" -o binance.html -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          curl -k -s "https://www.binance.com/es-LA/price/tether/VES" -o binance.html -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          
+          echo "Extrayendo tasa del JSON embebido..."
           
           python3 << 'EOF'
-          from lxml import html
           import re
+          import json
           
-          try:
-              with open('binance.html', 'r', encoding='utf-8') as f:
-                  tree = html.fromstring(f.read())
+          with open('binance.html', 'r', encoding='utf-8') as f:
+              html = f.read()
+          
+          # Buscar el JSON de c2cConvertData
+          match = re.search(r'"c2cConvertData":\s*\{[^}]*"price":\s*([\d.]+)', html)
+          
+          if match:
+              price = float(match.group(1))
+              print(f"Tasa encontrada: {price}")
               
-              # Buscar el valor USDT/VES en la página
-              # Binance suele mostrarlo en formato: "942.75 VES" o similar
-              texto = tree.text_content()
-              
-              # Buscar patrón de número con decimales seguido de VES
-              match = re.search(r'(\d+[.,]\d{2})\s*VES', texto)
-              
-              if match:
-                  tasa_str = match.group(1).replace(',', '.')
-                  tasa = float(tasa_str)
-                  
-                  if 500 < tasa < 2000:
-                      print(f"Tasa encontrada: {tasa}")
-                      with open('tasa_usdtves.csv', 'w') as f:
-                          f.write(f"{tasa:.2f}")
-                  else:
-                      print(f"Valor fuera de rango: {tasa}")
-                      with open('tasa_usdtves.csv', 'w') as f:
-                          f.write("943.00")
-              else:
-                  print("No se encontró el patrón")
+              # Validar que esté en rango razonable (500-2000)
+              if 500 < price < 2000:
                   with open('tasa_usdtves.csv', 'w') as f:
-                      f.write("943.00")
-          except Exception as e:
-              print(f"Error: {e}")
-              with open('tasa_usdtves.csv', 'w') as f:
-                  f.write("943.00")
+                      f.write(f"{price:.3f}")
+                  print(f"✅ Guardado: {price:.3f}")
+              else:
+                  print(f" Valor fuera de rango: {price}")
+                  exit(1)
+          else:
+              print(" No se encontró c2cConvertData en el HTML")
+              exit(1)
           EOF
       
       - name: Commit
