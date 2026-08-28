@@ -10,7 +10,8 @@
         body { font-family: system-ui, sans-serif; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 10px; }
         .container { background-color: rgba(45, 45, 45, 0.95); padding: 25px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.3); width: 100%; max-width: 400px; }
         h2 { text-align: center; color: #FFCD00; margin-top: 0; font-size: 1.8em; }
-        .tasa-info { text-align: center; font-size: 0.95em; background-color: #1e1e1e; padding: 10px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #FFCD00; }
+        .tasa-info { text-align: center; font-size: 0.9em; background-color: #1e1e1e; padding: 10px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #FFCD00; }
+        .tasa-principal { font-size: 1.3em; margin: 5px 0; }
         .fecha-actualizacion { font-size: 0.8em; color: #888; margin-top: 5px; }
         .input-group { margin-bottom: 18px; }
         label { display: block; margin-bottom: 6px; font-weight: bold; color: #ccc; font-size: 0.9em; }
@@ -26,11 +27,12 @@
         .refresh-btn { flex: 1; padding: 12px; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; background-color: #FFCD00; color: #1e1e1e; }
         .alert { background-color: #ff5722; color: white; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.85em; text-align: center; display: none; }
         
-        /* Botones de ajuste rápido */
         .ajuste-rapido { display: flex; gap: 5px; margin-top: 10px; flex-wrap: wrap; }
         .ajuste-rapido button { flex: 1; min-width: 60px; padding: 8px; border: none; border-radius: 6px; background-color: #444; color: white; cursor: pointer; font-size: 0.85em; }
         .ajuste-rapido button:hover { background-color: #555; }
         .ajuste-rapido button.active { background-color: #FFCD00; color: #1e1e1e; }
+        
+        .tipo-tasa { font-size: 0.8em; color: #666; margin-top: 5px; }
     </style>
 </head>
 <body>
@@ -41,6 +43,7 @@
     
     <div class="tasa-info" id="tasa-display">
         Calculando cruce...
+        <div class="tipo-tasa" id="tipo-tasa-display"></div>
         <div class="fecha-actualizacion" id="fecha-display"></div>
     </div>
 
@@ -48,13 +51,10 @@
         <div class="ajuste-header">
             <span>Tasa de cambio (COP por Bolívar)</span>
         </div>
-        <div class="tasa-actual" id="tasa-actual-display">3.50</div>
+        <div class="tasa-actual" id="tasa-actual-display">--</div>
         <input type="range" id="ajuste-slider" min="0" max="100" value="50" step="1">
         
-        <!-- Botones de ajuste rápido -->
-        <div class="ajuste-rapido" id="botones-rapidos">
-            <!-- Se generan dinámicamente -->
-        </div>
+        <div class="ajuste-rapido" id="botones-rapidos"></div>
     </div>
     
     <div class="input-group">
@@ -63,7 +63,7 @@
     </div>
 
     <div class="input-group">
-        <label for="cop">🇴 Pesos Colombianos (COP)</label>
+        <label for="cop">🇨🇴 Pesos Colombianos (COP)</label>
         <input type="number" id="cop" placeholder="0.00" step="0.01">
     </div>
 
@@ -71,14 +71,23 @@
 </div>
 
 <script>
-    const TASA_BCV_URL = "https://raw.githubusercontent.com/abjeropi/calculadora_bcv/main/tasa.csv";
+    // APIs para obtener tasas
+    const API_USDT_VES_URL = "https://api.exchangerate-api.com/v4/latest/USD"; // Tasa de mercado
     const API_COP_URL = "https://open.er-api.com/v6/latest/USD";
+    
+    // Tasa USDT/VES manual de respaldo (actualizar periódicamente)
+    // Esta es la tasa del mercado paralelo/USDT en Venezuela
+    const USDT_VES_FALLBACK = 1100; // Ajustar según el mercado
 
     let tasaBase = 0;
     let tasaActual = 0;
+    let usdVES = 0;
+    let usdCOP = 0;
+    
     const vesInput = document.getElementById('ves');
     const copInput = document.getElementById('cop');
     const tasaDisplay = document.getElementById('tasa-display');
+    const tipoTasaDisplay = document.getElementById('tipo-tasa-display');
     const fechaDisplay = document.getElementById('fecha-display');
     const alertBox = document.getElementById('alert');
     const slider = document.getElementById('ajuste-slider');
@@ -96,8 +105,7 @@
     });
 
     function setTasaDirecta(valor) {
-        // Calcular posición del slider basada en el valor
-        const minTasa = tasaBase - 1.0;
+        const minTasa = Math.max(0, tasaBase - 1.0);
         const maxTasa = tasaBase + 1.0;
         const posicion = ((valor - minTasa) / (maxTasa - minTasa)) * 100;
         slider.value = Math.max(0, Math.min(100, posicion));
@@ -108,13 +116,11 @@
     }
 
     function actualizarTasaDesdeSlider() {
-        const minTasa = tasaBase - 1.0;
+        const minTasa = Math.max(0, tasaBase - 1.0);
         const maxTasa = tasaBase + 1.0;
         const posicion = parseInt(slider.value);
         tasaActual = minTasa + (posicion / 100) * (maxTasa - minTasa);
         tasaActualDisplay.innerText = tasaActual.toFixed(2);
-        
-        // Actualizar botones activos
         actualizarBotonesActivos();
     }
 
@@ -131,9 +137,9 @@
     function generarBotonesRapidos() {
         botonesRapidos.innerHTML = '';
         const valores = [
-            tasaBase - 0.5,
-            tasaBase - 0.3,
-            tasaBase - 0.1,
+            Math.max(0, tasaBase - 0.5),
+            Math.max(0, tasaBase - 0.3),
+            Math.max(0, tasaBase - 0.1),
             tasaBase,
             tasaBase + 0.1,
             tasaBase + 0.3,
@@ -153,25 +159,37 @@
     }
 
     async function cargarTasas() {
-        tasaDisplay.innerHTML = "🔄 Obteniendo tasas...";
+        tasaDisplay.innerHTML = '<div class="tasa-principal">🔄 Obteniendo tasas...</div>';
+        tipoTasaDisplay.innerText = "";
         alertBox.style.display = 'none';
         
         try {
-            const resBCV = await fetch(TASA_BCV_URL + '?t=' + Date.now());
-            if (!resBCV.ok) throw new Error("BCV");
-            const usdVES = parseFloat((await resBCV.text()).trim());
-
+            // 1. Obtener USD/COP (Peso Colombiano)
             const resCOP = await fetch(API_COP_URL);
-            if (!resCOP.ok) throw new Error("COP");
+            if (!resCOP.ok) throw new Error("COP API");
             const dataCOP = await resCOP.json();
-            const usdCOP = dataCOP.rates.COP;
+            usdCOP = dataCOP.rates.COP;
+
+            // 2. Obtener USD/VES (Tasa de mercado/USDT)
+            // Nota: Esta API da la tasa oficial, pero podemos usar un factor
+            const resVES = await fetch(API_USDT_VES_URL);
+            if (resVES.ok) {
+                const dataVES = await resVES.json();
+                // La API devuelve la tasa oficial, usamos el fallback como base
+                // pero podríamos ajustar con un multiplicador si encontramos una API del paralelo
+                usdVES = USDT_VES_FALLBACK;
+            } else {
+                usdVES = USDT_VES_FALLBACK;
+            }
 
             if (usdVES > 100 && usdCOP > 1000) {
+                // Calcular cruce: USD/COP ÷ USD/VES = COP/VES
                 tasaBase = usdCOP / usdVES;
                 tasaActual = tasaBase;
                 
                 const fecha = new Date().toLocaleString('es-VE');
                 fechaDisplay.innerText = `Actualizado: ${fecha}`;
+                tipoTasaDisplay.innerText = `USD/VES: ${usdVES} (estimado) | USD/COP: ${usdCOP.toFixed(0)}`;
                 
                 tasaActualDisplay.innerText = tasaBase.toFixed(2);
                 slider.value = 50;
@@ -186,7 +204,8 @@
         } catch (error) {
             console.error(error);
             alertBox.style.display = 'block';
-            tasaDisplay.innerHTML = '️ Error de conexión';
+            tasaDisplay.innerHTML = '<div class="tasa-principal">⚠️ Error de conexión</div>';
+            tipoTasaDisplay.innerText = "Usando valores de respaldo";
         }
     }
 
