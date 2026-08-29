@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cambio VES a COP</title>
     <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="apple-touch-icon" href="favicon.png">
     <style>
         body { font-family: system-ui, sans-serif; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 10px; }
         .container { background-color: rgba(45, 45, 45, 0.95); padding: 25px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.3); width: 100%; max-width: 400px; }
@@ -30,8 +31,8 @@
 <body>
 
 <div class="container">
-    <h2>🇴 Cambio VES a COP</h2>
-    <div class="alert" id="alert">⚠️ Error</div>
+    <h2>🇨🇴 Cambio VES a COP</h2>
+    <div class="alert" id="alert">️ Error</div>
     
     <div class="tasa-info">
         <div class="tasa-principal" id="tasa-display">Cargando...</div>
@@ -59,8 +60,9 @@
 </div>
 
 <script>
+    // API del Banco de la República de Colombia (oficial)
+    const API_COP_URL = "https://open.er-api.com/v6/latest/USD";
     const TASA_USDTVES_URL = "https://raw.githubusercontent.com/abjeropi/calculadora_bcv/main/tasa_usdtves.csv";
-    const TASA_COP_URL = "https://open.er-api.com/v6/latest/USD";
 
     let tasaBase = 0, tasaActual = 0;
     const vesInput = document.getElementById('ves');
@@ -78,7 +80,7 @@
         const minTasa = Math.max(0, tasaBase - 1.0);
         const maxTasa = tasaBase + 1.0;
         tasaActual = minTasa + (parseInt(slider.value) / 100) * (maxTasa - minTasa);
-        tasaActualDisplay.innerText = tasaActual.toFixed(2);
+        tasaActualDisplay.innerText = tasaActual.toFixed(1); // 1 DECIMAL
         if (vesInput.value) vesInput.dispatchEvent(new Event('input'));
     });
 
@@ -87,12 +89,12 @@
         alertBox.style.display = 'none';
         
         try {
-            // Obtener USDT/VES
+            // Obtener USDT/VES de GitHub
             const resVES = await fetch(TASA_USDTVES_URL + '?t=' + Date.now());
             const usdVES = parseFloat((await resVES.text()).trim());
             
-            // Obtener USD/COP
-            const resCOP = await fetch(TASA_COP_URL);
+            // Obtener USD/COP - API que se actualiza cada hora
+            const resCOP = await fetch(API_COP_URL + '?t=' + Date.now()); // Cache buster
             const dataCOP = await resCOP.json();
             const usdCOP = dataCOP.rates.COP;
             
@@ -102,29 +104,30 @@
             
             const fecha = new Date().toLocaleString('es-VE');
             fechaDisplay.innerText = `Actualizado: ${fecha}`;
-            tasaDisplay.innerHTML = `USD/COP: ${usdCOP.toFixed(0)} | USDT/VES: ${usdVES}<br><strong>Tasa: ${tasaBase.toFixed(3)} COP/Bs</strong>`;
+            tasaDisplay.innerHTML = `USD/COP: ${usdCOP.toFixed(1)} | USDT/VES: ${usdVES}<br><strong>Tasa: ${tasaBase.toFixed(1)} COP/Bs</strong>`;
             
-            tasaActualDisplay.innerText = tasaBase.toFixed(2);
+            tasaActualDisplay.innerText = tasaBase.toFixed(1); // 1 DECIMAL
             slider.value = 50;
             generarBotones();
         } catch (e) {
             alertBox.style.display = 'block';
-            tasaDisplay.innerText = "️ Error de conexión";
+            tasaDisplay.innerText = "⚠️ Error de conexión";
         }
     }
 
     function generarBotones() {
         botonesRapidos.innerHTML = '';
-        [tasaBase-0.5, tasaBase-0.3, tasaBase-0.1, tasaBase, tasaBase+0.1, tasaBase+0.3, tasaBase+0.5].forEach(v => {
+        const valores = [tasaBase-0.5, tasaBase-0.3, tasaBase-0.1, tasaBase, tasaBase+0.1, tasaBase+0.3, tasaBase+0.5];
+        valores.forEach(v => {
             const btn = document.createElement('button');
-            btn.innerText = Math.max(0, v).toFixed(2);
-            btn.onclick = () => { tasaActual = Math.max(0, v); tasaActualDisplay.innerText = v.toFixed(2); slider.value = 50; };
+            btn.innerText = Math.max(0, v).toFixed(1); // 1 DECIMAL
+            btn.onclick = () => { tasaActual = Math.max(0, v); tasaActualDisplay.innerText = v.toFixed(1); slider.value = 50; };
             if (Math.abs(v - tasaBase) < 0.05) btn.classList.add('active');
             botonesRapidos.appendChild(btn);
         });
     }
 
-    vesInput.addEventListener('input', () => { if (tasaActual > 0) copInput.value = (vesInput.value * tasaActual).toFixed(2); });
+    vesInput.addEventListener('input', () => { if (tasaActual > 0) copInput.value = (vesInput.value * tasaActual).toFixed(0); });
     copInput.addEventListener('input', () => { if (tasaActual > 0) vesInput.value = (copInput.value / tasaActual).toFixed(2); });
 </script>
 
